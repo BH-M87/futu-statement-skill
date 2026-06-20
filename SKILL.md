@@ -1,25 +1,37 @@
 ---
 name: parsing-futu-statements
-description: Use when extracting trades, dividends, interest, fees, or realized P&L from Futu (富途) HK monthly e-statement PDFs (證券月結單) — for individual income tax on foreign income (个税 境外所得), CRS reporting, accounting, or broker P&L reconciliation. Covers where dividends and realized P&L actually live (they are not where you expect) and how to reconstruct figures the statement does not compute. PDF-only; does not use the Futu OpenD/API.
+description: Use when extracting trades, dividends, interest, fees, or realized P&L from Futu (富途) HK statements — the annual statement (年度账单 .xlsx) or the monthly e-statements (證券月結單 .pdf) — for individual income tax on foreign income (个税 境外所得), CRS reporting, accounting, or broker P&L reconciliation. Covers where dividends and realized P&L actually live (they are not where you expect) and how to reconstruct figures the statement does not compute. Reads official statement files only; does not use the Futu OpenD/API.
 ---
 
 # Parsing Futu Statements
 
 ## Overview
 
-Futu (富途證券) HK monthly e-statements (`保證金綜合帳戶 證券月結單`) are the authoritative
-record for tax/accounting, but two things people look for **are not there**:
+Futu (富途證券) HK statements are the authoritative record for tax/accounting, but two
+things people look for **are not there**:
 
 - There is **no "已實現盈虧" (realized P&L) section** — reconstruct it from the trade list.
 - There is **no section named "派息/股息" (dividend)** — cash dividends are buried inside
-  **`公司行動` (corporate actions)** in the `資金進出` section.
+  **`公司行動` (corporate actions)**.
 
-**Input is PDF-only.** Do not use the Futu OpenD trading API: it exposes no realized P&L,
-no fees, no labeled dividends (cash-flow types come back as "其他"), and only single-day
-cash-flow queries. The statement PDFs are the source of truth. Get them from the Futu app:
-`我的 → 賬戶詳情 → 電子結單 / 月結單`.
+`parse_futu_statement.py` (this skill) reads either format and **auto-detects which**:
 
-`parse_futu_statement.py` (this skill) turns a folder of statement PDFs into tax-ready CSVs.
+| Input | Where to get it | Notes |
+|---|---|---|
+| **年度账单 `.xlsx`** (preferred) | Futu app → 我的 → 賬戶詳情 → 年度账单 | Cleaner; has **期初/期末 holdings**, so cross-year positions realize correctly |
+| **月結單 `.pdf`** (one or many) | Futu app → 我的 → 賬戶詳情 → 電子結單/月結單 | Needs `pdftotext`; no opening positions → cross-year items can be missed |
+
+If a folder has both, **the xlsx wins** (more accurate — see below). Do **not** use the Futu
+OpenD API: it exposes no realized P&L, no fees, no labeled dividends (cash-flow types come
+back as "其他"). The statement files are the source of truth.
+
+### Why the annual xlsx is more accurate
+
+The monthly PDFs only cover the calendar year, so a position **opened in a prior December**
+(e.g. a written option) and closed in January is invisible — its opening trade isn't in any
+2025 statement. The annual xlsx lists **期初 (opening) holdings**, so such carried-in
+positions are seeded and realize correctly. In one real case the two methods differed by
+exactly the premium of one year-boundary short put.
 
 ## When to Use
 
@@ -32,10 +44,17 @@ Not for: real-time positions/quotes; US-broker statements (different layout).
 ## Quick Start
 
 ```bash
-brew install poppler                       # or: apt install poppler-utils  (gives pdftotext)
+# annual xlsx (preferred):  pip install openpyxl
+python3 parse_futu_statement.py 2025_年度账单.xlsx -o out/ --rate 0.90322
+
+# monthly PDFs:  brew install poppler   (or: apt install poppler-utils)
 python3 parse_futu_statement.py /folder-of-pdfs -o out/ --rate 0.90322
+
+# a folder with both -> xlsx auto-wins
+python3 parse_futu_statement.py /folder -o out/ --rate 0.90322
 ```
 
+Requirements: **xlsx mode → `openpyxl`**; **pdf mode → `pdftotext` (poppler)**.
 `--rate` (optional) is the HKD→RMB year-end 中间价; it adds an RMB column. Outputs
 (`YEAR` auto-detected; utf-8-sig for Excel):
 
@@ -49,7 +68,11 @@ python3 parse_futu_statement.py /folder-of-pdfs -o out/ --rate 0.90322
 
 The script prints `Σ变动金额`, dividends, and realized total so you can sanity-check.
 
-## Statement Structure
+## Statement Structure (PDF)
+
+The annual **xlsx** has the same data as clean sheets (`证券-交易流水` / `证券-资金进出` /
+`证券-资产进出` / `证券-持仓总览` with 期初/期末), so it needs no text parsing. The messy
+parsing below applies to the monthly **PDF** layout:
 
 | Section | Holds | Use for |
 |---|---|---|
