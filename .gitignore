@@ -1,0 +1,13 @@
+# Never commit personal financial data
+*.pdf
+*.PDF
+out/
+futu_parsed/
+*_parsed/
+*.csv
+
+# Python / OS junk
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
