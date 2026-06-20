@@ -25,6 +25,7 @@ Outputs (CSV, utf-8-sig; YEAR auto-detected):
     futu_<YEAR>_期权行权到期.csv        option expiry(EXP) / assignment(ASS) events
     futu_<YEAR>_已实现盈亏_按标的.csv    realized P&L per instrument (average-cost)
     futu_<YEAR>_账户净值.csv           opening/closing balances (cross-check)
+    futu_<YEAR>_税务汇总.csv           tax summary: gains/dividends/interest + tax due (--rate)
 
 Requirements: xlsx mode -> `pip install openpyxl`;  pdf mode -> `pdftotext` (poppler).
 No personal data is embedded; everything is read from the file(s) you pass in.
@@ -41,6 +42,8 @@ TAX_CASH_TYPES = ("公司行動", "公司行动", "出入金",
                   "證券月度利息扣除", "证券月度利息扣除", "月度利息扣除", "月度利息",
                   "融券利息", "首次稅局登記費", "首次税局登记费", "稅局登記費", "税局登记费")
 DIV_TYPES = ("公司行動", "公司行动")
+INTEREST_TYPES = ("證券月度利息扣除", "证券月度利息扣除", "月度利息扣除", "月度利息",
+                  "融券利息", "首次稅局登記費", "首次税局登记费", "稅局登記費", "税局登记费")
 FILL_RE = re.compile(
     r"(SEHK|NASDAQ|NYSE|ARCA|AMEX|US)\s+(HKD|USD|CNH|JPY|SGD)\s+"
     r"(\d{4}/\d{2}/\d{2})\s+(\d{4}/\d{2}/\d{2})\s+"
@@ -401,13 +404,43 @@ def main(argv=None):
     # 5) 账户净值
     write(f"futu_{year}_账户净值.csv", nav[0], nav[1])
 
-    div = sum(c[3] for c in cashflows if c[1] in DIV_TYPES and c[3] > 0)
+    # 6) 税务汇总 (个税 境外所得; this account only — combine 财产转让 across accounts before taxing)
+    div = sum(c[3] for c in cashflows if c[1] in DIV_TYPES and c[3] > 0)        # gross dividends
+    interest = sum(c[3] for c in cashflows if c[1] in INTEREST_TYPES)            # paid (negative)
+    r = rate or 0
+    div_tax = round(div * r * 0.20, 2) if rate else ""                          # dividends: flat 20%
+    cap_tax = (round(total * r * 0.20, 2) if (rate and total > 0) else (0.0 if rate else ""))
+    def rmb(v): return round(v * rate, 2) if rate else ""
+    tax_header = ["所得项目", "金额(HKD)"] + (["金额(RMB)", "应纳税额(RMB)"] if rate else []) + ["税率", "备注"]
+    tax_rows = [
+        ["财产转让所得·已实现(本账户股票/期权)", round(total, 2)]
+        + ([rmb(total), cap_tax] if rate else [])
+        + ["20%", "盈利才计税且需与其他账户同类所得盈亏合并;本表仅本账户,亏损不计税"],
+        ["利息股息红利所得·现金分红(毛额)", round(div, 2)]
+        + ([rmb(div), div_tax] if rate else [])
+        + ["20%", "单独计税,不可扣成本/不可与亏损相抵;境外已预扣可申请抵免"],
+        ["(备查)利息及费用支出", round(interest, 2)]
+        + ([rmb(interest), ""] if rate else [])
+        + ["—", "融资/融券利息、登记费等;非收入,做财产转让可作合理费用参考"],
+    ]
+    if rate:
+        total_tax = round((div_tax or 0) + (cap_tax or 0), 2)
+        tax_rows.append(["合计·本账户应纳税额(估)", "", "", total_tax, "",
+                         "= 分红税 + 财产转让税(本账户);财产转让最终税额须合并其他账户后确定"])
+    else:
+        tax_rows.append(["提示", "", "", "传 --rate <年末中间价> 可计算人民币与应纳税额"])
+    write(f"futu_{year}_税务汇总.csv", tax_header, tax_rows)
+
+
     print(f"source: {mode}  year={year} -> {args.outdir}/")
     print(f"  成交明细:        {len(trades)} 笔, Σ变动金额={sum(r[10] for r in trades):,.2f}")
     print(f"  股息利息现金流:  {len(cf_tax)} 行, 股息(公司行动+)={div:,.2f}")
     print(f"  期权行权到期:    {len(opt_events)} events")
     print(f"  已实现盈亏:      Σ={total:,.2f} HKD" + (f" = RMB {total*rate:,.2f}" if rate else "")
           + ("  (含期初结转)" if opening else "  (无期初, PDF口径)"))
+    if rate:
+        print(f"  税务汇总:        分红税 RMB {div_tax:,.2f}"
+              + (f" + 财产转让税 RMB {cap_tax:,.2f}" if total > 0 else " (财产转让本账户亏损,不计税)"))
     return 0
 
 

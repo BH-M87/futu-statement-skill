@@ -61,6 +61,7 @@ added. The year is auto-detected.
 | `futu_<YEAR>_期权行权到期.csv` | option expiry (EXP) / assignment (ASS) events |
 | `futu_<YEAR>_已实现盈亏_按标的.csv` | realized P&L per instrument (average-cost) |
 | `futu_<YEAR>_账户净值.csv` | opening / closing balances (cross-check) |
+| `futu_<YEAR>_税务汇总.csv` | tax summary — capital gains / dividends / interest + tax due (needs `--rate`) |
 
 The script prints `Σ变动金额`, total dividends, and realized P&L so you can sanity-check.
 
