@@ -21,6 +21,11 @@ things people look for **are not there**:
 | **年度账单 `.xlsx`** (preferred) | Futu app → 我的 → 賬戶詳情 → 年度账单 | Cleaner; has **期初/期末 holdings**, so cross-year positions realize correctly |
 | **月結單 `.pdf`** (one or many) | Futu app → 我的 → 賬戶詳情 → 電子結單/月結單 | Needs `pdftotext`; no opening positions → cross-year items can be missed |
 
+Both are exported from the Futu **mobile app** (there is no API/CLI to auto-fetch, so this
+skill cannot download them for you — it parses the files you provide). Help: how to get the
+monthly statement — https://www.futuhk.com/support/topic2_332 (the annual statement is in the
+same app). If you run the tool and no `.xlsx`/`.pdf` is found, it prints these steps.
+
 If a folder has both, **the xlsx wins** (more accurate — see below). Do **not** use the Futu
 OpenD API: it exposes no realized P&L, no fees, no labeled dividends (cash-flow types come
 back as "其他"). The statement files are the source of truth.

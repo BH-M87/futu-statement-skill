@@ -27,6 +27,11 @@ This repo captures the method (see [`SKILL.md`](SKILL.md)) and ships a parser th
 | **`年度账单` .xlsx** (preferred) | Futu app → 我的 → 賬戶詳情 → 年度账单 | Cleaner; has **期初/期末 holdings**, so cross-year positions realize correctly |
 | **`月結單` .pdf** (one or many) | Futu app → 我的 → 賬戶詳情 → 電子結單/月結單 | Needs `pdftotext`; no opening positions |
 
+Both are exported from the Futu **mobile app** — there's no API/CLI to auto-fetch, so this
+tool parses the files you provide rather than downloading them. Help: how to get the monthly
+statement → https://www.futuhk.com/support/topic2_332 (the annual statement is in the same
+app). If no `.xlsx`/`.pdf` is found at runtime, the tool prints these steps.
+
 Point the tool at a file or a folder. **If a folder has both, the xlsx wins** — it's more
 accurate: the monthly PDFs only cover the calendar year, so a position opened last December
 and closed in January is invisible, whereas the annual xlsx seeds it from `期初` (opening)

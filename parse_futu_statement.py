@@ -44,6 +44,17 @@ TAX_CASH_TYPES = ("公司行動", "公司行动", "出入金",
 DIV_TYPES = ("公司行動", "公司行动")
 INTEREST_TYPES = ("證券月度利息扣除", "证券月度利息扣除", "月度利息扣除", "月度利息",
                   "融券利息", "首次稅局登記費", "首次税局登记费", "稅局登記費", "税局登记费")
+NO_INPUT_HELP = """\
+✗ 没找到富途结单（给定路径下没有 .xlsx 或 .pdf）。
+富途结单需在 App 内手动导出（无 API / CLI 可自动拉取）：
+  • 年度结单（推荐，一个 xlsx）: 富途牛牛 App → 我的 → 账户详情 → 年度账单
+  • 月度结单（每月一份 PDF）:    富途牛牛 App → 我的 → 账户详情 → 电子结单/月结单
+帮助中心:
+  如何获取月结单: https://www.futuhk.com/support/topic2_332
+  年度结单同样在手机 App 内获取。
+导出后，把文件（或所在目录）作为参数传入，例如:
+  python3 parse_futu_statement.py 2025_年度账单.xlsx -o out/ --rate 0.90322
+  python3 parse_futu_statement.py /结单所在目录 -o out/ --rate 0.90322"""
 FILL_RE = re.compile(
     r"(SEHK|NASDAQ|NYSE|ARCA|AMEX|US)\s+(HKD|USD|CNH|JPY|SGD)\s+"
     r"(\d{4}/\d{2}/\d{2})\s+(\d{4}/\d{2}/\d{2})\s+"
@@ -322,7 +333,7 @@ def main(argv=None):
         elif p.lower().endswith(".pdf"):
             pdfs.append(p)
     if not xlsxs and not pdfs:
-        sys.exit("no .xlsx or .pdf found in the given input(s)")
+        sys.exit(NO_INPUT_HELP)
     os.makedirs(args.outdir, exist_ok=True)
 
     if xlsxs:                                             # xlsx wins (more accurate)
