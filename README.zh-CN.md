@@ -50,7 +50,9 @@ python3 parse_futu_statement.py /月结单目录/        -o 输出/ --rate 0.903
 python3 parse_futu_statement.py /目录              -o 输出/ --rate 0.90322   # 两者都有→选xlsx
 ```
 
-`--rate` 可选 —— HKD→RMB 年末中间价；给了就额外输出人民币列。年份自动识别。
+**按币种分别处理**（HKD、USD…）：已实现盈亏、分红、税额都按币种分组，绝不跨币种相加。
+`--rate` 是 HKD→RMB 年末中间价的简写；其他币种用 `--fx-rate 币种=汇率`（可重复），例如
+`--fx-rate HKD=0.90322 --fx-rate USD=7.0288`。两者都不传时，会用内置的当年年末中间价（若有）。年份自动识别。
 
 ### 输出（UTF-8-BOM，Excel 直接打开不乱码）
 

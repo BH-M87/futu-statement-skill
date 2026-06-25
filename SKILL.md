@@ -60,8 +60,10 @@ python3 parse_futu_statement.py /folder -o out/ --rate 0.90322
 ```
 
 Requirements: **xlsx mode → `openpyxl`**; **pdf mode → `pdftotext` (poppler)**.
-`--rate` (optional) is the HKD→RMB year-end 中间价; it adds an RMB column. Outputs
-(`YEAR` auto-detected; utf-8-sig for Excel):
+Everything is grouped **per currency** (HKD/USD/…) and never summed across currencies.
+`--rate` is the HKD→RMB year-end 中间价 shorthand; use `--fx-rate CCY=RATE` (repeatable, e.g.
+`--fx-rate USD=7.0288`) for other currencies. Built-in year-end rates apply when neither is
+given. Outputs (`YEAR` auto-detected; utf-8-sig for Excel):
 
 | File | Contents |
 |---|---|
@@ -141,7 +143,8 @@ handles:
 
 ## Tax note (个税 境外所得)
 
-Convert HKD to RMB at the year-end 人民币汇率中间价 (汇算清缴 口径; pass via `--rate`).
+Convert each currency to RMB at the year-end 人民币汇率中间价 (汇算清缴 口径; HKD via `--rate`,
+others via `--fx-rate CCY=RATE`). Realized P&L and tax are kept separate per currency.
 Capital gains (财产转让所得) and dividends (利息股息红利所得, flat 20%) are taxed separately —
 keep them in separate files (this skill does). Same-market securities gains/losses generally
 net within 财产转让所得. Confirm netting scope, foreign-tax credit, and FX 口径 with a tax advisor.

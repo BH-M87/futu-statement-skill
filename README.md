@@ -54,8 +54,11 @@ python3 parse_futu_statement.py /folder-of-pdfs   -o out/ --rate 0.90322   # mon
 python3 parse_futu_statement.py /folder           -o out/ --rate 0.90322   # both -> xlsx wins
 ```
 
-`--rate` is optional — the HKD→RMB year-end mid-rate (中间价); when given, an RMB column is
-added. The year is auto-detected.
+Statements are handled **per currency** (HKD, USD, …): realized P&L, dividends and tax are
+grouped by currency and never summed across them. `--rate` is the HKD→RMB year-end mid-rate
+(中间价) shorthand; for other currencies pass `--fx-rate CCY=RATE` (repeatable), e.g.
+`--fx-rate HKD=0.90322 --fx-rate USD=7.0288`. When neither is given, built-in year-end rates
+are used if available for the detected year. The year is auto-detected.
 
 ### Outputs (UTF-8-BOM, Excel-friendly)
 
