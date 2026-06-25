@@ -94,6 +94,66 @@ class CurrencyHandlingTest(unittest.TestCase):
         total = next(r for r in rows if r["代码"] == "合计")
         self.assertEqual(float(total["已实现盈亏(原币)"]), 30.0)
 
+    def test_legit_short_open_and_partial_close_are_not_flagged(self):
+        # 1) 卖出开仓做空,全年不平 -> 合法,不标记,已实现=0
+        b = F.realized_by_ticker([trade_row("2025/01/02", "S", "HKD", 1000.0, qty=100, opening=True)], [])
+        self.assertFalse(b[("HKD", "S")]["shorted"])
+        self.assertEqual(round(b[("HKD", "S")]["realized"], 2), 0.0)
+        # 2) 真·部分平仓(买入开仓100,卖出平仓30) -> 仍持正持仓,不标记
+        trades = [trade_row("2025/01/02", "L", "HKD", -1000.0, qty=100, opening=True),
+                  trade_row("2025/06/01", "L", "HKD", 330.0, qty=30, opening=False)]
+        b = F.realized_by_ticker(trades, [])
+        self.assertFalse(b[("HKD", "L")]["shorted"])
+        self.assertGreater(b[("HKD", "L")]["pos"], 0)
+        # 3) orphan 平仓(无对应开仓) -> 标记
+        b = F.realized_by_ticker([trade_row("2025/03/02", "O", "HKD", 1000.0, qty=100, opening=False)], [])
+        self.assertTrue(b[("HKD", "O")]["shorted"])
+
+    def _orphan_loaded(self):
+        # 賣出平倉 100@10 (+1000) with no prior 开仓 -> avg=0, would book 1000 as phantom profit
+        trades = [trade_row("2025/03/02", "HK700", "HKD", 1000.0, qty=100, opening=False)]
+        nav = (["时期类型", "类别", "货币", "金额(原币种)"], [])
+        return (trades, [], [], {}, nav, {})
+
+    def _run_loaded(self, loaded, extra):
+        outdir = tempfile.mkdtemp()
+        with patch.object(F, "load_pdfs", return_value=loaded):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                F.main(["x.pdf", "-o", outdir, *extra])
+        return Path(outdir)
+
+    def test_orphan_close_flag_includes_and_warns(self):
+        outdir = self._run_loaded(self._orphan_loaded(), [])      # default flag
+        with (outdir / "futu_2025_已实现盈亏_按标的.csv").open(encoding="utf-8-sig", newline="") as fp:
+            realized = list(csv.DictReader(fp))
+        detail = next(r for r in realized if r["代码"] == "HK700")
+        self.assertEqual(float(detail["已实现盈亏(原币)"]), 1000.0)
+        self.assertIn("缺少成本基础", detail["备注"])
+        total = next(r for r in realized if r["代码"] == "合计" and r["货币"] == "HKD")
+        self.assertEqual(float(total["已实现盈亏(原币)"]), 1000.0)
+
+    def test_orphan_close_exclude_drops_from_totals_and_tax(self):
+        outdir = self._run_loaded(self._orphan_loaded(), ["--on-negative-position", "exclude"])
+        with (outdir / "futu_2025_已实现盈亏_按标的.csv").open(encoding="utf-8-sig", newline="") as fp:
+            realized = list(csv.DictReader(fp))
+        detail = next(r for r in realized if r["代码"] == "HK700")
+        self.assertEqual(float(detail["已实现盈亏(原币)"]), 1000.0)   # shown for transparency
+        self.assertIn("排除", detail["备注"])
+        self.assertFalse([r for r in realized if r["代码"] == "合计"])
+        with (outdir / "futu_2025_税务汇总.csv").open(encoding="utf-8-sig", newline="") as fp:
+            tax = list(csv.DictReader(fp))
+        self.assertFalse([r for r in tax if r["所得项目"].startswith("财产转让")])
+
+    def test_orphan_close_short_includes_without_warning(self):
+        outdir = self._run_loaded(self._orphan_loaded(), ["--on-negative-position", "short"])
+        with (outdir / "futu_2025_已实现盈亏_按标的.csv").open(encoding="utf-8-sig", newline="") as fp:
+            realized = list(csv.DictReader(fp))
+        detail = next(r for r in realized if r["代码"] == "HK700")
+        self.assertIn("已确认", detail["备注"])
+        self.assertNotIn("⚠", detail["备注"])
+        total = next(r for r in realized if r["代码"] == "合计" and r["货币"] == "HKD")
+        self.assertEqual(float(total["已实现盈亏(原币)"]), 1000.0)
+
     def test_uses_2025_year_end_default_fx_rates_when_none_passed(self):
         outdir = self._run_main([])
 

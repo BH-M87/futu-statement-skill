@@ -322,6 +322,12 @@ def realized_by_ticker(trades, opt_events, opening=None):
     Positions still held at year-end keep realized = 0 (unrealized, not taxable this year).
     Each instrument is booked per currency: the same numeric code in HKD vs USD is a
     different position, and realized P&L is never summed across currencies.
+
+    A 平仓/CLOSE with no (or insufficient) prior 开仓 — avg=0, e.g. a position carried from a
+    prior year read from monthly PDFs (no 期初 seed), shares transferred in, or a missing
+    record — has no real cost basis, so booking it would overstate the gain. Such closes set
+    `shorted=True` to be surfaced/handled instead of silently taxed. The xlsx annual path
+    avoids most of these by seeding `opening` from 期初持仓.
     """
     book = {}
     ev_codes = {e["code"] for e in opt_events}
@@ -332,7 +338,7 @@ def realized_by_ticker(trades, opt_events, opening=None):
             currency, code = "", raw_key
         key = ((currency or "").upper(), str(code))
         book[key] = {"name": "", "currency": key[0], "pos": qty, "avg": avg,
-                     "realized": 0.0, "nfills": 0, "sum_net": 0.0, "carry": True}
+                     "realized": 0.0, "nfills": 0, "sum_net": 0.0, "carry": True, "shorted": False}
     for t in sorted(trades, key=lambda r: r[0]):          # stable -> preserves intraday order
         currency, code, name, d, q, net = (t[5] or "").upper(), t[2], t[3], t[4], float(t[6]), float(t[10])
         key = (currency, code)
@@ -340,20 +346,23 @@ def realized_by_ticker(trades, opt_events, opening=None):
             book[key] = book.pop(("", code))
             book[key]["currency"] = currency
         b = book.setdefault(key, {"name": "", "currency": currency, "pos": 0.0, "avg": 0.0,
-                                  "realized": 0.0, "nfills": 0, "sum_net": 0.0, "carry": False})
+                                  "realized": 0.0, "nfills": 0, "sum_net": 0.0, "carry": False, "shorted": False})
         if name and not b["name"]:
             b["name"] = name
         b["nfills"] += 1; b["sum_net"] += net
         buy = net < 0
-        if "开仓" in d or "開倉" in d:                     # OPEN
+        if "开仓" in d or "開倉" in d:                     # OPEN (买入开仓=long, 卖出开仓=legit short)
             prev = abs(b["pos"]); tot = b["avg"] * prev + net
             b["pos"] += q if buy else -q
             b["avg"] = tot / abs(b["pos"]) if abs(b["pos"]) > 1e-9 else 0.0
         else:                                             # CLOSE (平仓 / 强平)
+            prev = b["pos"]
             b["realized"] += (net / q + b["avg"]) * q
             b["pos"] += q if buy else -q
             if abs(b["pos"]) < 1e-9:
                 b["avg"] = 0.0
+            if abs(prev) < 1e-9 or q > abs(prev) + 1e-9:  # closing w/o (enough) basis -> phantom gain
+                b["shorted"] = True
     for key, b in book.items():
         if abs(b["pos"]) > 1e-9 and key[1] in ev_codes:   # expired/assigned -> close at 0
             b["realized"] += b["avg"] * abs(b["pos"]); b["pos"] = 0.0
@@ -376,6 +385,12 @@ def main(argv=None):
     ap.add_argument("--fx-rate", action="append", default=[], metavar="CCY=RATE",
                     help="currency-specific RMB FX rate, e.g. HKD=0.90322 or USD=7.10; may repeat; "
                          "defaults to built-in year-end rates when available")
+    ap.add_argument("--on-negative-position", choices=["flag", "exclude", "short"], default="flag",
+                    help="how to treat a 平仓 with no/insufficient prior 开仓 (missing cost basis, "
+                         "e.g. cross-year positions via PDF, transfers-in): "
+                         "'flag' (default) = compute & include in totals but warn; "
+                         "'exclude' = drop from totals/tax pending manual review; "
+                         "'short' = treat as a confirmed genuine short (compute, include, no warning)")
     args = ap.parse_args(argv)
 
     xlsxs, pdfs = [], []
@@ -463,9 +478,23 @@ def main(argv=None):
         if held and b["nfills"] == 0 and b.get("carry"):
             continue                                      # carried-in & untouched & still held -> skip
         realized = round(b["realized"], 2)               # closed-portion gain is realized & taxable
-        totals[currency] += realized                      # even if part of the position is still held
-        note = ("年末仍有持仓,未实现部分不计入(已平仓部分已计入)" if held
-                else ("含上年结转持仓" if b.get("carry") and b["nfills"] == 0 else ""))
+        excluded = b.get("shorted") and args.on_negative_position == "exclude"
+        if not excluded:
+            totals[currency] += realized                  # even if part of the position is still held
+        notes = []
+        if held:
+            notes.append("年末仍有持仓(空头),未实现不计入" if b["pos"] < 0
+                         else "年末仍有持仓,未实现部分不计入(已平仓部分已计入)")
+        elif b.get("carry") and b["nfills"] == 0:
+            notes.append("含上年结转持仓")
+        if b.get("shorted"):
+            if args.on_negative_position == "short":
+                notes.append("做空/超额平仓(已确认),已计入")
+            elif excluded:
+                notes.append("⚠ 缺成本基础:已从合计/税务中排除,待核对")
+            else:
+                notes.append("⚠ 平仓无对应开仓/超额平仓:疑似缺少成本基础(转入/跨年PDF/记录缺失),请核对")
+        note = ";".join(notes)
         row = [code, disp(code, b["name"]), currency, b["nfills"], round(b["sum_net"], 2), realized]
         if fx_rates:
             row.append(rmb(realized, currency))
@@ -534,6 +563,16 @@ def main(argv=None):
           + ("  (含期初结转)" if opening else "  (无期初, PDF口径)"))
     if fx_rates:
         print(f"  税务汇总:        本账户应纳税额估算 RMB {tax_total_rmb:,.2f}")
+    shorted = sorted(f"{ccy}:{code}" for (ccy, code), b in book.items() if b.get("shorted"))
+    if shorted and args.on_negative_position == "flag":
+        print(f"  ⚠ 负持仓提醒(NEGATIVE_POSITION):  {', '.join(shorted)} 出现平仓无对应开仓/超额平仓——"
+              f"通常意味着缺少成本基础(跨年持仓走 PDF 口径无期初、转入股票、或记录缺失),已计入合计,可能虚高。\n"
+              f"    处理方式:① 改用年度账单 xlsx(含期初持仓)或补上成本基础重跑(最准);"
+              f"② --on-negative-position=exclude 先从合计/税务中排除待核对;"
+              f"③ 若确实是做空,--on-negative-position=short 确认计入。", file=sys.stderr)
+    elif shorted and args.on_negative_position == "exclude":
+        print(f"  ⚠ 已排除负持仓标的(NEGATIVE_POSITION):  {', '.join(shorted)} 已从合计/税务中排除,待核对成本基础。",
+              file=sys.stderr)
     return 0
 
 

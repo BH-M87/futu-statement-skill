@@ -76,6 +76,33 @@ given. Outputs (`YEAR` auto-detected; utf-8-sig for Excel):
 
 The script prints `Σ变动金额`, dividends, and realized total so you can sanity-check.
 
+## Negative positions — STOP and confirm with the user
+
+Futu trades carry explicit 開倉/平倉 labels, so a genuine opening short (`賣出開倉`) is handled
+correctly (stays unrealized while held). But a **平仓/CLOSE with no — or insufficient — prior
+开仓 in the data** has no cost basis (`avg=0`), so the close would book the **full proceeds as
+profit**. This happens when the opening isn't in the parsed data:
+
+- **PDF path, cross-year holdings** — bought last year, sold this year: the 开仓 is in last
+  year's statements, not this year's PDFs. Use the **annual xlsx** instead (it seeds 期初持仓
+  cost basis from `证券-持仓总览`), or the gain is overstated.
+- **Shares transferred in** (recorded in 资产进出, not as a trade) and later sold.
+- Any missing/garbled trade record.
+
+The script sets `--on-negative-position {flag,exclude,short}` (default `flag`) and tags the
+stderr line `NEGATIVE_POSITION`. **When you (Claude) see that marker (or a `⚠` note in
+`已实现盈亏_按标的.csv`), do NOT silently report the number.** Surface it and let the user pick:
+
+1. **改用年度账单 xlsx / 补成本基础重跑(最准 / recommended)** — re-run on the annual xlsx so
+   期初持仓 seeds the cost basis, or supply the missing opening cost. The only option that
+   yields a correct realized number.
+2. **先排除待核对** — re-run with `--on-negative-position=exclude`; the flagged instrument is
+   dropped from totals and 税务汇总 pending manual handling.
+3. **确认是做空** — only if the user confirms a genuine short, re-run with
+   `--on-negative-position=short` to include it without the warning.
+
+Real partial closes (position still **positive** after the sell) are never flagged.
+
 ## Statement Structure (PDF)
 
 The annual **xlsx** has the same data as clean sheets (`证券-交易流水` / `证券-资金进出` /
